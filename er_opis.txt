@@ -1,28 +1,29 @@
-Informačný systém uchováva údaje o produktoch.
-Produkt slúži ako zovšeobecnenie liekov a doplnkového tovaru.
-Pre jednoznačné rozlíšenie je každému produktu priradené jedinečné ID produktu.
-Pri produktoch ďalej evidujeme názov, popis, cenu, množstvo na sklade a veľkosť balenia.
+Informačný systém uchováva údaje o produktoch. Produkt predstavuje zovšeobecnenie liekov a doplnkového tovaru.
+Každý produkt je jednoznačne identifikovaný svojím ID produktu. O produkte sa evidujú atribúty názov, popis, cena,
+množstvo na sklade a veľkosť balenia.
 
-Liek je špeciálny typ produktu, pri ktorom navyše evidujeme atribút spôsob výdaja na rozlíšenie medzi liekmi na predpis a voľnopredajnými liekmi.
-Doplnkový tovar je iný typ produktu, ktorý má atribút kategória tovaru.
+Liek je špeciálny typ produktu, pri ktorom sa navyše eviduje spôsob výdaja. Doplnkový tovar je ďalší špeciálny typ produktu,
+pri ktorom sa eviduje kategória tovaru.
 
-Ďalšia vec ktorú evidujeme sú účinky liekov. Účinok je identifikovaný svojím Názvom.
-Taktiež pri účinku evidujeme popis a typ účinku.
-Väzba medzi liekom a účinkom určuje, že liek má aspoň jeden, ale môže mat aj viac účinkov, pričom účinok nemusí byť priradený žiadnemu, ale môže byť priradený aj naraz viac liekom.
+Systém eviduje aj účinky liekov. Účinok je identifikovaný svojím názvom a ďalej sa pri ňom uchováva popis a typ účinku.
+Liek má aspoň jeden účinok a môže ich mať viac. Naopak, účinok nemusí byť priradený žiadnemu lieku,
+ale môže byť priradený aj viacerým liekom.
 
-Produkty sú uskladnené v Skladoch. Sklad je identifikovaný svojím ID skladu.
-O skladoch uchovávame ich názov a kapacitu.
-Produkt môže byť vo viacerých skladoch, ale nemusí byť v žiadnom a sklad obsahuje viacero produktov, no takisto môže byť prázdny. Systém taktiež uchováva dátumy doplnenia zásob.
+Produkty sú uskladnené v skladoch. Sklad je identifikovaný svojím ID skladu a evidujú sa pri ňom názov a kapacita.
+Produkt môže byť vo viacerých skladoch, ale nemusí byť v žiadnom sklade. Rovnako sklad môže obsahovať viacero produktov,
+ale môže byť aj prázdny. Pri väzbe medzi produktom a skladom sa eviduje dátum doplnenia zásob.
 
-Systém zaznamenáva Predaje. Každý predaj je identifikovaný unikátnym Číslom transakcie.
-Pri predaji sa ukladá dátum a čas, lekárnik, spôsob platby a obsah predaja.
-Predaj zahŕňa aspoň jeden Produkt, pričom Produkt môže byť súčasťou viacerých, ale aj žiadneho predaju.
+Systém zaznamenáva predaje. Každý predaj je identifikovaný číslom transakcie. Pri predaji sa evidujú
+dátum a čas, lekárnik a spôsob platby. Predaj zahŕňa aspoň jeden produkt, pričom produkt môže byť súčasťou
+viacerých predajov alebo nemusí byť súčasťou žiadneho predaja.
 
-V systéme sú evidované Zdravotné poisťovne, identifikované unikátnym číslom poisťovne a názvom.
-Zdravotná poisťovňa môže prispievať na lieky.
-Väzba medzi poisťovňou a liekom eviduje atribúty Výška príspevku a Platnosť príspevku. Poisťovňa môže, no nemusí prispievať na viac liekov, a na jeden liek môže, no nemusí prispievať viac poisťovní,
+V systéme sú evidované zdravotné poisťovne. Zdravotná poisťovňa je identifikovaná číslom poisťovne a
+eviduje sa pri nej názov. Zdravotná poisťovňa môže prispievať na lieky. Pri väzbe medzi zdravotnou poisťovňou a liekom
+sa evidujú atribúty výška príspevku a platnosť príspevku. Poisťovňa môže prispievať na viac liekov alebo
+na žiadny liek. Rovnako na jeden liek môže prispievať viac poisťovní alebo aj žiadna poisťovňa.
 
-Poslednou entitou v systéme je Výkaz. Výkaz je identifikovaný číslom výkazu.
-O výkaze evidujeme dátum exportu a rozsah zahrnutých transakcií.
-Výkaz obsahuje aspoň jeden predaj, pričom jeden predaj môže patriť maximálne do jedného výkazu.
-Výkaz je vytvorený pre práve jednu Zdravotnú poisťovňu, pričom poisťovňa môže mať viacero výkazov.
+Poslednou entitou v systéme je výkaz. Výkaz je identifikovaný číslom výkazu.
+Evidujú sa pri ňom rozsah transakcií a dátum exportu.
+Výkaz obsahuje aspoň jeden predaj, pričom jeden predaj môže patriť najviac do jedného výkazu 
+alebo nemusí patriť do žiadneho výkazu. Každý výkaz je vytvorený pre práve jednu zdravotnú poisťovňu, 
+pričom jedna zdravotná poisťovňa môže mať viacero výkazov.
