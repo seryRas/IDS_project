@@ -190,3 +190,43 @@ INSERT INTO STATEMENTS (transaction_from, transaction_to, date_of_export, sale_i
     VALUES (Date '2026-01-01', Date '2026-12-31', Date '2027-01-01', 2, '15975328');
 
 COMMIT;
+
+---------------------------------------------------------------------------------------
+-- 4. SELECT statements
+---------------------------------------------------------------------------------------
+
+-- returns method od disbursment for aspirin
+SELECT MEDICINE.METHOD_OF_DISBURSEMENT FROM MEDICINE JOIN PRODUCTS ON PRODUCTS.PRODUCT_ID = MEDICINE.MEDICINE_ID
+    WHERE PRODUCTS.PRODUCT_NAME = 'Aspirin';
+
+-- returns names of sold products and amount sold in each sale
+SELECT PRODUCTS.PRODUCT_NAME, SALE_ITEMS.AMOUNT FROM PRODUCTS JOIN SALE_ITEMS ON SALE_ITEMS.PRODUCT_ID = PRODUCTS.PRODUCT_ID;
+
+-- returns name of repository, amount and name of all types of vitamins in there
+SELECT REPOSITORY.REPO_NAME, REPO_CONTAINS.AMOUNT_ON_REPOSITORY, PRODUCTS.PRODUCT_NAME FROM REPOSITORY 
+                JOIN REPO_CONTAINS ON REPOSITORY.REPOSITORY_ID = REPO_CONTAINS.REPOSITORY_ID
+                JOIN PRODUCTS ON PRODUCTS.PRODUCT_ID = REPO_CONTAINS.PRODUCT_ID
+    WHERE PRODUCTS.PRODUCT_NAME LIKE 'Vitamin%';
+
+
+-- returns name of pharmacist and amount of sales he made
+SELECT PHARMACIST_NAME, COUNT(SALE_ID) AS POCET_PREDAJOV FROM SALES GROUP BY PHARMACIST_NAME;
+
+-- returns average contribution for each insurance company and its name
+SELECT HEALTH_INSURANCE_COMPANY.COMPANY_NAME, AVG(CONTRIBUTE_TO.CONTRIBUTION_AMOUNT) AS AVERAGE_CONTRIBUTION FROM HEALTH_INSURANCE_COMPANY 
+        JOIN CONTRIBUTE_TO ON HEALTH_INSURANCE_COMPANY.NUMBER_OF_COMPANY = CONTRIBUTE_TO.NUMBER_OF_COMPANY
+            GROUP BY COMPANY_NAME;
+
+-- returns names of all products in main warehouse
+SELECT PRODUCT_NAME FROM PRODUCTS 
+    WHERE PRODUCT_ID IN 
+        (SELECT PRODUCT_ID FROM REPO_CONTAINS 
+                   JOIN REPOSITORY ON REPOSITORY.REPOSITORY_ID = REPO_CONTAINS.REPOSITORY_ID 
+            WHERE REPOSITORY.REPO_NAME = 'Main Warehouse');
+
+-- returns names of all products in secondary warehouse
+SELECT PRODUCT_NAME FROM PRODUCTS 
+        WHERE EXISTS (SELECT 1 FROM REPO_CONTAINS
+                            WHERE REPO_CONTAINS.PRODUCT_ID = PRODUCTS.PRODUCT_ID 
+                                AND REPOSITORY_ID = 2);
+
