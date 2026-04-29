@@ -244,4 +244,41 @@ WITH AVERAGE_CONTRIBUTION AS
                 WHERE AVERAGE_CONTRIBUTED = (SELECT MAX(AVERAGE_CONTRIBUTED) FROM AVERAGE_CONTRIBUTION);
 
 
+-------------------------------------------------------
+-- 5. TRIGGERS
+-------------------------------------------------------
+CREATE OR REPLACE TRIGGER repository_limit_trigger
+BEFORE INSERT OR UPDATE ON repo_contains
+FOR EACH ROW
+    DECLARE
+        var_current_capacity INT;
+        var_max_capacity INT;
+BEGIN
+    SELECT capacity INTO var_max_capacity FROM repository
+                                          WHERE repository_id = :NEW.repository_id;
 
+    SELECT COALESCE(SUM(amount_on_repository), 0) 
+    INTO var_current_capacity
+    FROM repo_contains
+    WHERE repository_id = :NEW.repository_id
+        AND product_id != :NEW.product_id;
+
+    IF (var_current_capacity + :NEW.amount_on_repository) > var_max_capacity THEN
+        RAISE_APPLICATION_ERROR(-20100, 'you are trying to add into repository more products than is maximum capacity');
+    END IF;
+END;
+
+CREATE OR REPLACE TRIGGER check_sale_statement_date
+BEFORE INSERT OR UPDATE ON Statements
+FOR EACH ROW
+DECLARE
+    v_sale_date TIMESTAMP;
+BEGIN
+    SELECT sell_timestamp INTO v_sale_date
+    FROM Sales
+    WHERE sale_id = :NEW.sale_id;
+
+    IF v_sale_date < :NEW.transaction_from OR v_sale_date > :NEW.transaction_to THEN        
+        RAISE_APPLICATION_ERROR(-20101, 'sale date doesnt correspond with statement date');
+    END IF;
+END;
