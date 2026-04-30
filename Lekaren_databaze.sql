@@ -247,38 +247,74 @@ WITH AVERAGE_CONTRIBUTION AS
 -------------------------------------------------------
 -- 5. TRIGGERS
 -------------------------------------------------------
-CREATE OR REPLACE TRIGGER repository_limit_trigger
-BEFORE INSERT OR UPDATE ON repo_contains
-FOR EACH ROW
-    DECLARE
-        var_current_capacity INT;
-        var_max_capacity INT;
-BEGIN
-    SELECT capacity INTO var_max_capacity FROM repository
-                                          WHERE repository_id = :NEW.repository_id;
 
-    SELECT COALESCE(SUM(amount_on_repository), 0) 
-    INTO var_current_capacity
-    FROM repo_contains
-    WHERE repository_id = :NEW.repository_id
-        AND product_id != :NEW.product_id;
-
-    IF (var_current_capacity + :NEW.amount_on_repository) > var_max_capacity THEN
-        RAISE_APPLICATION_ERROR(-20100, 'you are trying to add into repository more products than is maximum capacity');
-    END IF;
-END;
-
-CREATE OR REPLACE TRIGGER check_sale_statement_date
-BEFORE INSERT OR UPDATE ON Statements
+CREATE OR REPLACE TRIGGER check_contribution
+BEFORE INSERT OR UPDATE ON contribute_to
 FOR EACH ROW
 DECLARE
-    v_sale_date TIMESTAMP;
+    var_product_price NUMBER(8, 2);
 BEGIN
-    SELECT sell_timestamp INTO v_sale_date
-    FROM Sales
-    WHERE sale_id = :NEW.sale_id;
+    SELECT price INTO var_product_price
+        FROM products WHERE product_id = :NEW.medicine_id;
 
-    IF v_sale_date < :NEW.transaction_from OR v_sale_date > :NEW.transaction_to THEN        
+    IF :NEW.contribution_amount > var_product_price THEN
+        RAISE_APPLICATION_ERROR(-20100, 'you are trying to give medicine bigger contribution than it costs');
+    END IF;
+END;
+/
+
+SET SERVEROUTPUT ON;
+
+BEGIN
+    UPDATE contribute_to
+        SET contribution_amount = 8
+            WHERE number_of_company = 12345678 AND
+                    medicine_id = 1;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE(SQLERRM);
+END;
+/
+
+
+CREATE OR REPLACE TRIGGER check_sale_statement_date
+BEFORE INSERT OR UPDATE ON statements
+FOR EACH ROW
+DECLARE
+    var_sale_date TIMESTAMP;
+BEGIN
+    SELECT sell_timestamp INTO var_sale_date
+        FROM sales WHERE sale_id = :NEW.sale_id;
+
+    IF var_sale_date < :NEW.transaction_from OR var_sale_date > :NEW.transaction_to THEN        
         RAISE_APPLICATION_ERROR(-20101, 'sale date doesnt correspond with statement date');
     END IF;
 END;
+/
+
+
+SET SERVEROUTPUT ON;
+
+BEGIN
+    UPDATE statements
+        SET transaction_from = TO_DATE('2026-01-01', 'YYYY-MM-DD'),
+            transaction_to   = TO_DATE('2026-12-31', 'YYYY-MM-DD'),
+            sale_id          = 1
+            WHERE statement_id = 1;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE(SQLERRM);
+END;
+/
+
+
+-------------------------------------------------------
+-- 7. INDEX
+-------------------------------------------------------
+
+CREATE INDEX index_product_name ON products(product_name);
+
+SELECT product_name, price, product_description 
+            FROM products WHERE product_name = 'Aspirin';
