@@ -18,6 +18,8 @@ DROP TABLE Health_insurance_company CASCADE CONSTRAINTS;
 DROP TABLE Repository CASCADE CONSTRAINTS;
 DROP TABLE Products CASCADE CONSTRAINTS;
 
+DROP MATERIALIZED VIEW product_sales_summary;
+
 
 ---------------------------------------------------------------------------------------
 -- 2. TABLE CREATION
@@ -284,4 +286,137 @@ WITH AVERAGE_CONTRIBUTION AS
                 WHERE AVERAGE_CONTRIBUTED = (SELECT MAX(AVERAGE_CONTRIBUTED) FROM AVERAGE_CONTRIBUTION);
 
 
+-------------------------------------------------------
+-- 5. TRIGGERS
+-------------------------------------------------------
 
+CREATE OR REPLACE TRIGGER check_contribution
+BEFORE INSERT OR UPDATE ON contribute_to
+FOR EACH ROW
+DECLARE
+    var_product_price NUMBER(8, 2);
+BEGIN
+    SELECT price INTO var_product_price
+        FROM products WHERE product_id = :NEW.medicine_id;
+
+    IF :NEW.contribution_amount > var_product_price THEN
+        RAISE_APPLICATION_ERROR(-20100, 'you are trying to give medicine bigger contribution than it costs');
+    END IF;
+END;
+/
+
+SET SERVEROUTPUT ON;
+
+BEGIN
+    UPDATE contribute_to
+        SET contribution_amount = 8
+            WHERE number_of_company = 12345678 AND
+                    medicine_id = 1;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE(SQLERRM);
+END;
+/
+
+
+CREATE OR REPLACE TRIGGER check_sale_statement_date
+BEFORE INSERT OR UPDATE ON statements
+FOR EACH ROW
+DECLARE
+    var_sale_date TIMESTAMP;
+BEGIN
+    SELECT sell_timestamp INTO var_sale_date
+        FROM sales WHERE sale_id = :NEW.sale_id;
+
+    IF var_sale_date < :NEW.transaction_from OR var_sale_date > :NEW.transaction_to THEN        
+        RAISE_APPLICATION_ERROR(-20101, 'sale date doesnt correspond with statement date');
+    END IF;
+END;
+/
+
+
+SET SERVEROUTPUT ON;
+
+BEGIN
+    UPDATE statements
+        SET transaction_from = TO_DATE('2026-01-01', 'YYYY-MM-DD'),
+            transaction_to   = TO_DATE('2026-12-31', 'YYYY-MM-DD'),
+            sale_id          = 1
+            WHERE statement_id = 1;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE(SQLERRM);
+END;
+/
+
+
+-------------------------------------------------------
+-- 6. INDEX
+-------------------------------------------------------
+
+CREATE INDEX index_product_name ON products(product_name);
+
+SELECT product_name, price, product_description 
+            FROM products WHERE product_name = 'Aspirin';
+
+
+
+GRANT SELECT ON Products                  TO XSERYRA00;
+GRANT SELECT ON Sale_Items                TO XSERYRA00;
+GRANT SELECT ON Sales                     TO XSERYRA00;
+GRANT SELECT ON Repository                TO XSERYRA00;
+GRANT SELECT ON Repo_contains             TO XSERYRA00;
+GRANT SELECT ON Medicine                  TO XSERYRA00;
+GRANT SELECT ON Additional_goods          TO XSERYRA00;
+GRANT SELECT ON Effect                    TO XSERYRA00;
+GRANT SELECT ON Health_insurance_company  TO XSERYRA00;
+GRANT SELECT ON Contribute_to             TO XSERYRA00;
+GRANT SELECT ON Statements                TO XSERYRA00;
+
+-------------------------------------------------------
+-- 6. MATERIALIZED VIEW
+-------------------------------------------------------
+
+CREATE MATERIALIZED VIEW product_sales_summary AS
+SELECT
+    p.product_id,
+    p.product_name,
+    p.price,
+    COUNT(si.sale_id)        AS times_sold,
+    SUM(si.amount)           AS total_units_sold,
+    SUM(si.amount * p.price) AS total_revenue
+FROM XRUCEKK00.Products p
+JOIN XRUCEKK00.Sale_Items si ON p.product_id = si.product_id
+GROUP BY p.product_id, p.product_name, p.price;
+
+SELECT * FROM product_sales_summary
+ORDER BY total_revenue DESC;
+
+SELECT 
+    mview_name, 
+    refresh_mode,
+    TO_CHAR(last_refresh_date, 'YYYY-MM-DD HH24:MI:SS') AS last_refreshed
+FROM user_mviews
+WHERE mview_name = 'PRODUCT_SALES_SUMMARY';
+
+
+INSERT INTO Sales (sell_timestamp, pharmacist_name, payment_method)
+    VALUES (TO_TIMESTAMP('2026-04-30 09:00:00', 'YYYY-MM-DD HH24:MI:SS'), 'Kristian Rucek', 'Cash');
+
+INSERT INTO Sale_Items (sale_id, product_id, amount) VALUES (7, 1, 50);
+INSERT INTO Sale_Items (sale_id, product_id, amount) VALUES (7, 3, 30);
+
+COMMIT;
+
+-- view before refresh - still shows old data
+SELECT product_name, total_units_sold, total_revenue
+FROM product_sales_summary
+ORDER BY total_units_sold DESC;
+
+EXEC DBMS_MVIEW.REFRESH('PRODUCT_SALES_SUMMARY');
+
+SELECT product_name, total_units_sold, total_revenue
+FROM product_sales_summary
+ORDER BY total_units_sold DESC;
