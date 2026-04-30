@@ -353,14 +353,32 @@ END;
 
 
 -------------------------------------------------------
--- 6. INDEX
+-- 6. INDEX + EXPLAIN PLAN
 -------------------------------------------------------
 
-CREATE INDEX index_product_name ON products(product_name);
+-- we want to optimize: total revenue per product
 
-SELECT product_name, price, product_description 
-            FROM products WHERE product_name = 'Aspirin';
+-- DROP INDEX index_product_name;
 
+-- EXPLAIN PLAN before index
+EXPLAIN PLAN FOR
+SELECT p.product_name, SUM(si.amount * p.price) AS total_revenue
+FROM Products p
+JOIN Sale_Items si ON p.product_id = si.product_id
+GROUP BY p.product_name;
+
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
+
+CREATE INDEX idx_saleitems_productid ON Sale_Items(product_id);
+
+-- EXPLAIN PLAN after index  
+EXPLAIN PLAN FOR
+SELECT p.product_name, SUM(si.amount * p.price) AS total_revenue
+FROM Products p
+JOIN Sale_Items si ON p.product_id = si.product_id
+GROUP BY p.product_name;
+
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
 
 
 GRANT SELECT ON Products                  TO XSERYRA00;
