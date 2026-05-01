@@ -290,28 +290,50 @@ WITH AVERAGE_CONTRIBUTION AS
 -- 5. TRIGGERS
 -------------------------------------------------------
 
-CREATE OR REPLACE TRIGGER check_contribution
-BEFORE INSERT OR UPDATE ON contribute_to
-FOR EACH ROW
-DECLARE
-    var_product_price NUMBER(8, 2);
-BEGIN
-    SELECT price INTO var_product_price
-        FROM products WHERE product_id = :NEW.medicine_id;
 
-    IF :NEW.contribution_amount > var_product_price THEN
-        RAISE_APPLICATION_ERROR(-20100, 'you are trying to give medicine bigger contribution than it costs');
+CREATE OR REPLACE TRIGGER trg_prevent_undercutting
+    BEFORE UPDATE OF price ON Products
+    FOR EACH ROW
+    DECLARE
+        var_max_contribution NUMBER(8, 2);
+        var_is_medicine INT;
+    BEGIN
+        SELECT COUNT(*) INTO var_is_medicine FROM Medicine
+                    WHERE medicine_id = :NEW.product_id;
+
+        IF var_is_medicine > 0 THEN
+        
+            SELECT COALESCE(MAX(contribution_amount), 0)
+                INTO var_max_contribution FROM Contribute_to
+                WHERE medicine_id = :NEW.product_id;
+
+        IF :NEW.price < var_max_contribution THEN
+            RAISE_APPLICATION_ERROR(-20115, 'price is lower than contribuution');
+        END IF;
+        
     END IF;
 END;
 /
 
+-- activates trigger (highest contribution for aspirin is 2)
 SET SERVEROUTPUT ON;
-
 BEGIN
-    UPDATE contribute_to
-        SET contribution_amount = 8
-            WHERE number_of_company = 12345678 AND
-                    medicine_id = 1;
+    UPDATE products
+        SET price = 1.5
+            WHERE product_id = 1;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE(SQLERRM);
+END;
+/
+
+--doesnt activate it
+SET SERVEROUTPUT ON;
+BEGIN
+    UPDATE products
+        SET price = 2.5
+            WHERE product_id = 1;
 
     EXCEPTION
         WHEN OTHERS THEN
@@ -320,38 +342,53 @@ END;
 /
 
 
-CREATE OR REPLACE TRIGGER check_sale_statement_date
-BEFORE INSERT OR UPDATE ON statements
-FOR EACH ROW
-DECLARE
-    var_sale_date TIMESTAMP;
-BEGIN
-    SELECT sell_timestamp INTO var_sale_date
-        FROM sales WHERE sale_id = :NEW.sale_id;
+CREATE OR REPLACE TRIGGER trg_validate_statement_claim
+BEFORE INSERT OR UPDATE ON Statements
+    FOR EACH ROW
+        DECLARE
+            var_sale_date DATE;
+            var_valid_items INT;
+        BEGIN
+        SELECT CAST(sell_timestamp AS DATE) INTO var_sale_date
+                    FROM Sales WHERE sale_id = :NEW.sale_id;
 
-    IF var_sale_date < :NEW.transaction_from OR var_sale_date > :NEW.transaction_to THEN        
-        RAISE_APPLICATION_ERROR(-20101, 'sale date doesnt correspond with statement date');
-    END IF;
+        SELECT COUNT(*) INTO var_valid_items FROM Sale_Items si
+        JOIN Contribute_to c ON si.product_id = c.medicine_id
+            WHERE si.sale_id = :NEW.sale_id AND c.number_of_company = :NEW.number_of_company
+                                AND var_sale_date BETWEEN c.available_from AND c.available_to;
+
+        IF var_valid_items = 0 THEN
+            RAISE_APPLICATION_ERROR(-20120, 'trying to add sale into statement of insurance company 
+                        while there is no item in sale that this insurance company contributes to');
+        END IF;
 END;
 /
 
-
+--activates trigger
 SET SERVEROUTPUT ON;
-
 BEGIN
-    UPDATE statements
-        SET transaction_from = TO_DATE('2026-01-01', 'YYYY-MM-DD'),
-            transaction_to   = TO_DATE('2026-12-31', 'YYYY-MM-DD'),
-            sale_id          = 1
-            WHERE statement_id = 1;
+    INSERT INTO Statements (transaction_from, transaction_to, date_of_export, sale_id, number_of_company)
+        VALUES (Date '2025-01-01', Date '2025-12-31', SYSDATE, 3, '12345678');
 
+    COMMIT;
     EXCEPTION
         WHEN OTHERS THEN
             DBMS_OUTPUT.PUT_LINE(SQLERRM);
 END;
 /
 
+--does not
+SET SERVEROUTPUT ON;
+BEGIN
+    INSERT INTO Statements (transaction_from, transaction_to, date_of_export, sale_id, number_of_company)
+        VALUES (Date '2025-01-01', Date '2025-12-31', SYSDATE, 6, '25874136');
 
+    COMMIT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE(SQLERRM);
+END;
+/
 -------------------------------------------------------
 -- 6. INDEX + EXPLAIN PLAN
 -------------------------------------------------------
@@ -394,7 +431,7 @@ GRANT SELECT ON Contribute_to             TO XSERYRA00;
 GRANT SELECT ON Statements                TO XSERYRA00;
 
 -------------------------------------------------------
--- 6. MATERIALIZED VIEW
+-- 7. MATERIALIZED VIEW
 -------------------------------------------------------
 
 CREATE MATERIALIZED VIEW product_sales_summary AS
@@ -438,3 +475,163 @@ EXEC DBMS_MVIEW.REFRESH('PRODUCT_SALES_SUMMARY');
 SELECT product_name, total_units_sold, total_revenue
 FROM product_sales_summary
 ORDER BY total_units_sold DESC;
+
+-------------------------------------------------------
+-- 8. procedures
+-------------------------------------------------------
+
+CREATE OR REPLACE PROCEDURE process_sale (
+    p_pharmacist_name IN sales.pharmacist_name%TYPE,
+    p_payment_method  IN sales.payment_method%TYPE,
+    p_product_id      IN products.product_id%TYPE,
+    p_repo_id         IN repository.repository_id%TYPE, 
+    p_amount          IN sale_items.amount%TYPE) IS
+
+    var_current_stock repo_contains.amount_on_repository%TYPE;
+    var_sale_id sales.sale_id%TYPE;
+    
+    error_insufficient_stock EXCEPTION;
+BEGIN
+    SELECT amount_on_repository INTO var_current_stock
+        FROM Repo_contains WHERE product_id = p_product_id AND repository_id = p_repo_id;
+
+    IF var_current_stock < p_amount THEN
+        RAISE error_insufficient_stock;
+    END IF;
+
+    INSERT INTO sales (sell_timestamp, pharmacist_name, payment_method)
+        VALUES (SYSTIMESTAMP, p_pharmacist_name, p_payment_method)
+    RETURNING sale_id INTO var_sale_id;
+
+    INSERT INTO sale_items (sale_id, product_id, amount)
+        VALUES (var_sale_id, p_product_id, p_amount);
+
+    UPDATE repo_contains
+        SET amount_on_repository = amount_on_repository - p_amount
+            WHERE product_id = p_product_id AND repository_id = p_repo_id;
+
+        COMMIT;
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        DBMS_OUTPUT.PUT_LINE('ERROR: given product is not in repository');
+        ROLLBACK;
+    WHEN error_insufficient_stock THEN
+        DBMS_OUTPUT.PUT_LINE('ERROR: insufficient stock for given product');
+        ROLLBACK;
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('UNEXPECTED ERROR ' || SQLERRM);
+        ROLLBACK;
+END;
+/
+
+
+--successfull
+EXEC process_sale('Rastislav Sery', 'Cash', 2, 1, 5);
+
+-- fails
+EXEC process_sale('Rastislav Sery', 'Cash', 2, 1, 51);
+
+EXEC process_sale('Rastislav Sery', 'Cash', 2, 2, 51);
+
+ 
+CREATE OR REPLACE PROCEDURE process_refund (
+    p_sale_id    IN  sales.sale_id%TYPE,
+    p_product_id IN  products.product_id%TYPE,
+    p_repo_id    IN  repository.repository_id%TYPE,
+    p_amount     IN  sale_items.amount%TYPE) IS
+ 
+        var_original_amount  sale_items.amount%TYPE;
+        var_product_price    products.price%TYPE;
+        var_repo_exists      INTEGER;
+    
+        error_invalid_amount    EXCEPTION;
+        error_not_in_repo       EXCEPTION;
+    BEGIN
+        SELECT si.amount INTO var_original_amount
+            FROM Sale_Items si
+            WHERE si.sale_id = p_sale_id
+              AND si.product_id = p_product_id;
+    
+        IF p_amount <= 0 OR p_amount > var_original_amount THEN
+            RAISE error_invalid_amount;
+        END IF;
+    
+        SELECT COUNT(*) INTO var_repo_exists
+            FROM Repo_contains
+            WHERE product_id = p_product_id
+              AND repository_id = p_repo_id;
+    
+        IF var_repo_exists = 0 THEN
+            RAISE error_not_in_repo;
+        END IF;
+    
+        IF p_amount = var_original_amount THEN
+            DELETE FROM Sale_Items
+                WHERE sale_id = p_sale_id
+                  AND product_id = p_product_id;
+        ELSE
+            UPDATE Sale_Items
+                SET amount = amount - p_amount
+                WHERE sale_id = p_sale_id
+                  AND product_id = p_product_id;
+        END IF;
+    
+        UPDATE Repo_contains
+            SET amount_on_repository = amount_on_repository + p_amount,
+                date_of_supply = SYSDATE
+            WHERE product_id = p_product_id
+              AND repository_id = p_repo_id;
+    
+        COMMIT;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            DBMS_OUTPUT.PUT_LINE('ERROR: sale doesnt contain that item');
+            ROLLBACK;
+        WHEN error_invalid_amount THEN
+            DBMS_OUTPUT.PUT_LINE('ERROR: invalid amount of items to return');
+            ROLLBACK;
+        WHEN error_not_in_repo THEN
+            DBMS_OUTPUT.PUT_LINE('ERROR: product isnt being stored in this repository');
+            ROLLBACK;
+        WHEN OTHERS THEN
+            DBMS_OUTPUT.PUT_LINE('UNEXPECTED ERROR: ' || SQLERRM);
+            ROLLBACK;
+END;
+/
+
+--runs
+EXEC process_refund(1, 2, 1, 1);
+
+--fails
+EXEC process_refund(1, 2, 1, 2);
+
+EXEC process_refund(1, 2, 2, 1);
+
+EXEC process_refund(1, 3, 2, 1);
+
+
+-------------------------------------------------------
+-- 9. select
+-------------------------------------------------------
+
+
+WITH sales_totals AS (
+    SELECT
+        si.product_id,
+        SUM(si.amount) AS total_units_sold,
+        SUM(si.amount * p.price) AS total_revenue
+    FROM Sale_Items si JOIN Products p ON p.product_id = si.product_id
+        GROUP BY si.product_id) 
+SELECT
+    p.product_name,
+    st.total_units_sold,
+    ROUND(st.total_revenue, 2) AS total_revenue,
+    CASE
+        WHEN st.total_revenue >= 60 THEN 'High'
+        WHEN st.total_revenue >= 40  THEN 'Medium'
+        ELSE                              'Low'
+    END AS sales_label
+FROM sales_totals st JOIN Products p ON p.product_id = st.product_id
+    ORDER BY st.total_revenue DESC;
+ 

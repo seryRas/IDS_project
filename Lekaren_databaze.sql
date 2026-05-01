@@ -248,21 +248,6 @@ WITH AVERAGE_CONTRIBUTION AS
 -- 5. TRIGGERS
 -------------------------------------------------------
 
-CREATE OR REPLACE TRIGGER check_contribution
-BEFORE INSERT OR UPDATE ON contribute_to
-FOR EACH ROW
-DECLARE
-    var_product_price NUMBER(8, 2);
-BEGIN
-    SELECT price INTO var_product_price
-        FROM products WHERE product_id = :NEW.medicine_id;
-
-    IF :NEW.contribution_amount > var_product_price THEN
-        RAISE_APPLICATION_ERROR(-20100, 'you are trying to give medicine bigger contribution than it costs');
-    END IF;
-END;
-/
-
 SET SERVEROUTPUT ON;
 
 BEGIN
@@ -308,8 +293,54 @@ BEGIN
             DBMS_OUTPUT.PUT_LINE(SQLERRM);
 END;
 /
+-------------------------------------------------------
+-- 6. PROCEDURES
+-------------------------------------------------------
+
+CREATE OR REPLACE PROCEDURE process_sale (p_pharmacist_name IN sales.pharmacist_name%TYPE,
+    p_payment_method IN sales.payment_method%TYPE, p_product_id IN products.product_id%TYPE,
+    p_repo_id IN repository.repository_id%TYPE, p_amount IN sale_items.amount%TYPE) IS
+
+    var_current_stock repo_contains.amount_on_repository%TYPE;
+    var_sale_id sales.sale_id%TYPE;
+    
+    error_insufficient_stock EXCEPTION;
+BEGIN
+    SELECT amount_on_repository INTO var_current_stock
+        FROM Repo_contains WHERE product_id = p_product_id AND repository_id = p_repo_id;
+
+    IF var_current_stock < p_amount THEN
+        RAISE error_insufficient_stock;
+    END IF;
+
+    INSERT INTO sales (sell_timestamp, pharmacist_name, payment_method)
+        VALUES (SYSTIMESTAMP, p_pharmacist_name, p_payment_method)
+    RETURNING sale_id INTO var_sale_id;
+
+    INSERT INTO sale_items (sale_id, product_id, amount)
+        VALUES (var_sale_id, p_product_id, p_amount);
+
+    UPDATE repo_contains
+        SET amount_on_repository = amount_on_repository - p_amount
+            WHERE product_id = p_product_id AND repository_id = p_repo_id;
+
+        COMMIT;
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        DBMS_OUTPUT.PUT_LINE('ERROR: given product is not in repository');
+        ROLLBACK;
+    WHEN error_insufficient_stock THEN
+        DBMS_OUTPUT.PUT_LINE('ERROR: insufficient stock for given product');
+        ROLLBACK;
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('UNEXPECTED ERROR ' || SQLERRM);
+        ROLLBACK;
+END;
+/
 
 
+EXEC process_sale('Rastislav Sery', 'Cash', 2, 1, 5);
 -------------------------------------------------------
 -- 7. INDEX
 -------------------------------------------------------
