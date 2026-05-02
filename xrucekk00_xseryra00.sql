@@ -290,8 +290,8 @@ WITH AVERAGE_CONTRIBUTION AS
 -- 5. TRIGGERS
 -------------------------------------------------------
 
-
-CREATE OR REPLACE TRIGGER trg_prevent_undercutting
+--trigger that automatically checks highest contribution when changing price of product so we dont make lower price than the contribution is
+CREATE OR REPLACE TRIGGER trg_check_contributions
     BEFORE UPDATE OF price ON Products
     FOR EACH ROW
     DECLARE
@@ -341,7 +341,7 @@ BEGIN
 END;
 /
 
-
+-- trigger to automatically check if the sale we are trying to put into statement has product the insurance company contributes to
 CREATE OR REPLACE TRIGGER trg_validate_statement_claim
 BEFORE INSERT OR UPDATE ON Statements
     FOR EACH ROW
@@ -480,6 +480,7 @@ ORDER BY total_units_sold DESC;
 -- 8. procedures
 -------------------------------------------------------
 
+--procedure to process sale, automaicaly creates sale row, reduces amount on repo
 CREATE OR REPLACE PROCEDURE process_sale (
     p_pharmacist_name IN sales.pharmacist_name%TYPE,
     p_payment_method  IN sales.payment_method%TYPE,
@@ -534,88 +535,87 @@ EXEC process_sale('Rastislav Sery', 'Cash', 2, 1, 51);
 
 EXEC process_sale('Rastislav Sery', 'Cash', 2, 2, 51);
 
- 
+
+-- procedure for refunding all items from given sale, automatically removes sale from table, increases product amounts in repo 
+
 CREATE OR REPLACE PROCEDURE process_refund (
-    p_sale_id    IN  sales.sale_id%TYPE,
-    p_product_id IN  products.product_id%TYPE,
-    p_repo_id    IN  repository.repository_id%TYPE,
-    p_amount     IN  sale_items.amount%TYPE) IS
+    p_sale_id IN sales.sale_id%TYPE,
+    p_repo_id IN repository.repository_id%TYPE) IS
  
-        var_original_amount  sale_items.amount%TYPE;
-        var_product_price    products.price%TYPE;
-        var_repo_exists      INTEGER;
-    
-        error_invalid_amount    EXCEPTION;
-        error_not_in_repo       EXCEPTION;
+    CURSOR cur_sale_items IS
+        SELECT si.product_id,
+               si.amount,
+               p.price
+        FROM Sale_Items si
+        JOIN Products p ON p.product_id = si.product_id
+        WHERE si.sale_id = p_sale_id;
+ 
+    var_item cur_sale_items%ROWTYPE;
+    var_repo_exists INTEGER;
+    var_sale_exists sales.sale_id%TYPE;
+ 
+    error_sale_not_found EXCEPTION;
+    error_not_in_repo    EXCEPTION;
+BEGIN
     BEGIN
-        SELECT si.amount INTO var_original_amount
-            FROM Sale_Items si
-            WHERE si.sale_id = p_sale_id
-              AND si.product_id = p_product_id;
-    
-        IF p_amount <= 0 OR p_amount > var_original_amount THEN
-            RAISE error_invalid_amount;
-        END IF;
-    
-        SELECT COUNT(*) INTO var_repo_exists
-            FROM Repo_contains
-            WHERE product_id = p_product_id
-              AND repository_id = p_repo_id;
-    
-        IF var_repo_exists = 0 THEN
-            RAISE error_not_in_repo;
-        END IF;
-    
-        IF p_amount = var_original_amount THEN
-            DELETE FROM Sale_Items
-                WHERE sale_id = p_sale_id
-                  AND product_id = p_product_id;
-        ELSE
-            UPDATE Sale_Items
-                SET amount = amount - p_amount
-                WHERE sale_id = p_sale_id
-                  AND product_id = p_product_id;
-        END IF;
-    
-        UPDATE Repo_contains
-            SET amount_on_repository = amount_on_repository + p_amount,
-                date_of_supply = SYSDATE
-            WHERE product_id = p_product_id
-              AND repository_id = p_repo_id;
-    
-        COMMIT;
+        SELECT sale_id INTO var_sale_exists
+            FROM Sales WHERE sale_id = p_sale_id;
     EXCEPTION
         WHEN NO_DATA_FOUND THEN
-            DBMS_OUTPUT.PUT_LINE('ERROR: sale doesnt contain that item');
-            ROLLBACK;
-        WHEN error_invalid_amount THEN
-            DBMS_OUTPUT.PUT_LINE('ERROR: invalid amount of items to return');
-            ROLLBACK;
-        WHEN error_not_in_repo THEN
-            DBMS_OUTPUT.PUT_LINE('ERROR: product isnt being stored in this repository');
-            ROLLBACK;
-        WHEN OTHERS THEN
-            DBMS_OUTPUT.PUT_LINE('UNEXPECTED ERROR: ' || SQLERRM);
-            ROLLBACK;
+            RAISE error_sale_not_found;
+    END;
+ 
+    OPEN cur_sale_items;
+    LOOP
+        FETCH cur_sale_items INTO var_item;
+        EXIT WHEN cur_sale_items%NOTFOUND;
+ 
+        SELECT COUNT(*) INTO var_repo_exists
+            FROM Repo_contains
+            WHERE product_id = var_item.product_id
+              AND repository_id = p_repo_id;
+ 
+        IF var_repo_exists = 0 THEN
+            CLOSE cur_sale_items;
+            RAISE error_not_in_repo;
+        END IF;
+ 
+        UPDATE Repo_contains
+            SET amount_on_repository = amount_on_repository + var_item.amount
+                WHERE product_id = var_item.product_id AND repository_id = p_repo_id;
+     END LOOP;
+    CLOSE cur_sale_items;
+    DELETE FROM Sale_Items WHERE sale_id = p_sale_id; 
+    COMMIT;
+ 
+EXCEPTION
+    WHEN error_sale_not_found THEN
+        DBMS_OUTPUT.PUT_LINE('given sale doesnt exists');
+        ROLLBACK;
+    WHEN error_not_in_repo THEN
+        DBMS_OUTPUT.PUT_LINE('product from sale is not stocked in this repository ');
+        ROLLBACK;
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('UNEXPECTED ERROR: ' || SQLERRM);
+        ROLLBACK;
 END;
 /
 
+
 --runs
-EXEC process_refund(1, 2, 1, 1);
+EXEC process_refund(1, 1);
 
 --fails
-EXEC process_refund(1, 2, 1, 2);
+EXEC process_refund(9999, 1);
 
-EXEC process_refund(1, 2, 2, 1);
-
-EXEC process_refund(1, 3, 2, 1);
+EXEC process_refund(1, 99);
 
 
 -------------------------------------------------------
 -- 9. select
 -------------------------------------------------------
 
-
+--makes descending table of total revenue made from all products and also puts them into groups
 WITH sales_totals AS (
     SELECT
         si.product_id,
