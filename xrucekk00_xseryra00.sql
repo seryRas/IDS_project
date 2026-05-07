@@ -395,25 +395,24 @@ END;
 
 -- we want to optimize: total revenue per product
 
--- DROP INDEX index_product_name;
-
 -- EXPLAIN PLAN before index
 EXPLAIN PLAN FOR
-SELECT p.product_name, SUM(si.amount * p.price) AS total_revenue
-FROM Products p
-JOIN Sale_Items si ON p.product_id = si.product_id
-GROUP BY p.product_name;
+    SELECT p.product_name, SUM(si.amount * p.price) AS total_revenue
+        FROM Products p
+        JOIN Sale_Items si ON p.product_id = si.product_id
+        GROUP BY p.product_name;
 
 SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
 
-CREATE INDEX idx_saleitems_productid ON Sale_Items(product_id);
+CREATE INDEX idx_saleitems_productid
+    ON Sale_Items(product_id, amount);
 
 -- EXPLAIN PLAN after index  
 EXPLAIN PLAN FOR
-SELECT p.product_name, SUM(si.amount * p.price) AS total_revenue
-FROM Products p
-JOIN Sale_Items si ON p.product_id = si.product_id
-GROUP BY p.product_name;
+    SELECT p.product_name, SUM(si.amount * p.price) AS total_revenue
+        FROM Products p
+        JOIN Sale_Items si ON p.product_id = si.product_id
+        GROUP BY p.product_name;
 
 SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);
 
@@ -434,27 +433,30 @@ GRANT SELECT ON Statements                TO XSERYRA00;
 -- 7. MATERIALIZED VIEW
 -------------------------------------------------------
 
+-- Total revenue per product
+-- XSERYRA00 should run this part of code
 CREATE MATERIALIZED VIEW product_sales_summary AS
-SELECT
-    p.product_id,
-    p.product_name,
-    p.price,
-    COUNT(si.sale_id)        AS times_sold,
-    SUM(si.amount)           AS total_units_sold,
-    SUM(si.amount * p.price) AS total_revenue
-FROM XRUCEKK00.Products p
-JOIN XRUCEKK00.Sale_Items si ON p.product_id = si.product_id
-GROUP BY p.product_id, p.product_name, p.price;
+    SELECT
+        p.product_id,
+        p.product_name,
+        p.price,
+        COUNT(si.sale_id)        AS times_sold,
+        SUM(si.amount)           AS total_units_sold,
+        SUM(si.amount * p.price) AS total_revenue
+            FROM XRUCEKK00.Products p
+            JOIN XRUCEKK00.Sale_Items si ON p.product_id = si.product_id
+            GROUP BY p.product_id, p.product_name, p.price;
+
 
 SELECT * FROM product_sales_summary
-ORDER BY total_revenue DESC;
+    ORDER BY total_revenue DESC;
 
 SELECT 
     mview_name, 
     refresh_mode,
     TO_CHAR(last_refresh_date, 'YYYY-MM-DD HH24:MI:SS') AS last_refreshed
-FROM user_mviews
-WHERE mview_name = 'PRODUCT_SALES_SUMMARY';
+        FROM user_mviews
+        WHERE mview_name = 'PRODUCT_SALES_SUMMARY';
 
 
 INSERT INTO Sales (sell_timestamp, pharmacist_name, payment_method)
@@ -467,14 +469,15 @@ COMMIT;
 
 -- view before refresh - still shows old data
 SELECT product_name, total_units_sold, total_revenue
-FROM product_sales_summary
-ORDER BY total_units_sold DESC;
+    FROM product_sales_summary
+    ORDER BY total_units_sold DESC;
 
 EXEC DBMS_MVIEW.REFRESH('PRODUCT_SALES_SUMMARY');
 
+-- show updated data
 SELECT product_name, total_units_sold, total_revenue
-FROM product_sales_summary
-ORDER BY total_units_sold DESC;
+    FROM product_sales_summary
+    ORDER BY total_units_sold DESC;
 
 -------------------------------------------------------
 -- 8. procedures
@@ -634,4 +637,3 @@ SELECT
     END AS sales_label
 FROM sales_totals st JOIN Products p ON p.product_id = st.product_id
     ORDER BY st.total_revenue DESC;
- 
